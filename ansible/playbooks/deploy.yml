@@ -1,0 +1,72 @@
+---
+- name: Setup Telegram bot automation
+  hosts: telegram_servers
+  vars_files:
+    - ../secrets.yml
+  become: true
+  vars:
+    service_name: "telegram_daily_bot"
+    on_calendar: "Mon..Fri 07:00:00 UTC"
+    message: "<b>Daily.</b>%0AFormat:%0AWhat did you do yesterday?%0AWhat will you do today?%0AWhat problems are there?%0A%0A<i>Reply to this message to answer.</i>"
+
+  tasks:
+    - name: Create the service directory for the Telegram bot
+      file:
+        path: "/opt/{{ service_name }}"
+        state: directory
+        mode: '0755'
+
+    - name: Copy send_daily_message.sh to target server
+      copy:
+        dest: "/opt/{{ service_name }}/send_daily_message.sh"
+        content: |
+          #!/bin/bash
+
+          curl -s -X POST "https://api.telegram.org/bot{{bot_token}}/sendMessage" \
+              -d "chat_id={{chat_id}}" \
+              -d "text={{message}}" \
+              -d "parse_mode=HTML"
+        mode: '0755'
+
+    - name: Create systemd service file for Telegram bot
+      copy:
+        dest: /etc/systemd/system/{{service_name}}.service
+        content: |
+          [Unit]
+          Description=Telegram Daily Bot
+          After=network.target
+
+          [Service]
+          ExecStart=/opt/{{ service_name }}/send_daily_message.sh
+          Type=oneshot
+          StandardOutput=journal
+          StandardError=journal
+
+          [Install]
+          WantedBy=multi-user.target
+        mode: '0644'
+
+    - name: Create systemd timer file for Telegram bot
+      copy:
+        dest: /etc/systemd/system/{{ service_name }}.timer
+        content: |
+          [Unit]
+          Description=Runs Telegram daily message
+
+          [Timer]
+          OnCalendar={{on_calendar}}
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+        mode: '0644'
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable and start systemd timer file for Telegram bot
+      systemd:
+        name: "{{ service_name }}.timer"
+        enabled: yes
+        state: started
